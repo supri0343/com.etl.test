@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "Com.Danliris.ETL.Service": {
+      "commandName": "Project"
+    }
+  }
+}

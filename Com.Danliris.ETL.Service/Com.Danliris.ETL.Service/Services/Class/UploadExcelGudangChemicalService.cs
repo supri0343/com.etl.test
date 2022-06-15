@@ -1,0 +1,237 @@
+﻿using Com.Danliris.ETL.Service.DBAdapters.GudangChemicalAdapters;
+using Com.Danliris.ETL.Service.Models.DashboardGudangChemicalModels;
+using Com.Danliris.ETL.Service.Tools;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Azure.WebJobs;
+using Microsoft.Azure.WebJobs.Extensions.Http;
+using Microsoft.Extensions.Logging;
+using OfficeOpenXml;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Com.Danliris.ETL.Service.Services.Interfaces;
+
+namespace Com.Danliris.ETL.Service.Services
+{
+    public class UploadExcelGudangChemicalService : IUploadExcelGudangChemicalService
+    {
+        static string connectionString = Environment.GetEnvironmentVariable("ConnectionStrings:SQLConnectionString", EnvironmentVariableTarget.Process);        
+        ConverterChecker converter = new ConverterChecker();
+        public IChemicalStockAdapter chemicalStockAdapter;
+        public IReleaseItemAdapter releaseItemAdapter;
+        public IReceiptItemAdapter receiptItemAdapter;
+        
+        GeneralHelper general = new GeneralHelper();
+
+        public UploadExcelGudangChemicalService(IServiceProvider provider)
+        {
+            chemicalStockAdapter = provider.GetService<IChemicalStockAdapter>();
+            releaseItemAdapter = provider.GetService<IReleaseItemAdapter>();
+            receiptItemAdapter = provider.GetService<IReceiptItemAdapter>();
+        }
+        public async Task Upload(ExcelWorksheets sheet, DateTime periode)
+        {
+            try
+            {
+                var data = 0;
+                foreach (var fileName in sheet)
+                {
+                    switch (fileName.Name.ToLower().Trim())
+                    {
+                        case "stock_chemical":
+                            await UploadStockChemical(sheet, periode, data);
+                            break;
+                        case "pengeluaran_barang":
+                            await UploadChemicalReleaseItem(sheet, periode, data);
+                            break;
+                        case "penerimaan_barang":
+                            await UploadReceiptItem(sheet, periode, data);
+                            break;
+                        default:
+                            throw new Exception(fileName.Name + " tidak valid");
+                    }
+                    data++;
+                }
+            }
+            catch (Exception e)
+            {
+                throw e;
+            }
+        }
+
+
+        #region Stock_Chemical
+        public async Task UploadStockChemical(ExcelWorksheets sheet, DateTime periode, int data)
+        {
+            var sheet1 = sheet[data];
+            var startRow = 3;
+            var startCol = 1;
+
+            var totalRows = sheet1.Dimension.Rows;
+            var totalCols = sheet1.Dimension.Columns;
+
+            var listData = new List<ChemicalStockModel>();
+            int rowIndex = 0;
+            try
+            {                
+                for (rowIndex = startRow; rowIndex <= totalRows; rowIndex++)
+                {
+
+                    if (sheet1.Cells[rowIndex, startCol].Value != null)
+                    {
+                        general.ValidatePeriode(sheet1.Cells[rowIndex,2], periode);
+                        listData.Add(new ChemicalStockModel(
+                           general.GenerateId(sheet1.Cells[rowIndex, startCol + 1], sheet1.Cells[rowIndex, 1]), //ID
+                           Convert.ToInt32(sheet1.Cells[rowIndex, startCol].Value), //No
+                           general.ConvertDateTime(sheet1.Cells[rowIndex, startCol + 1]), //Date
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 2]), //ItemCode
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 3]), //RackNo
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 4]), //MasterKd
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 5]), //ItemName
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 6]), //Unit
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 7]), //EarlyS
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 8]), //In
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 9]), //Out
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 10]) //FinalS
+                        ));
+                    }
+                }
+            }
+            catch(Exception ex){
+                throw new Exception($"Gagal memproses Sheet Stock_Chemical pada baris ke-{rowIndex} - {ex.Message}");
+            }
+
+            try{
+                if (listData.Count() > 0)
+                {
+                    await chemicalStockAdapter.DeleteByMonthAndYear(periode);
+                    await chemicalStockAdapter.InsertBulk(listData);
+                }
+
+            }
+            catch (Exception ex)
+            {
+
+                throw new Exception("Gagal menyimpan Sheet Stock_Chemical - " + ex.Message);
+            }
+        }
+        #endregion
+
+        #region Pengeluaran Barang
+        public async Task UploadChemicalReleaseItem(ExcelWorksheets sheet, DateTime periode, int data)
+        {
+            var sheet1 = sheet[data];
+            var startRow = 3;
+            var startCol = 1;
+
+            var totalRows = sheet1.Dimension.Rows;
+            var totalCols = sheet1.Dimension.Columns;
+
+            var listData = new List<ChemicalReleaseItemModel>();
+            int rowIndex = 0;
+            try
+            {                
+                for (rowIndex = startRow; rowIndex <= totalRows; rowIndex++)
+                {
+
+                    if (sheet1.Cells[rowIndex, startCol].Value != null)
+                    {
+                        general.ValidatePeriode(sheet1.Cells[rowIndex,2], periode);
+                        listData.Add(new ChemicalReleaseItemModel(
+                           general.GenerateId(sheet1.Cells[rowIndex, startCol + 1], sheet1.Cells[rowIndex, 1]), //ID
+                           Convert.ToInt32(sheet1.Cells[rowIndex, startCol].Value), //No
+                           general.ConvertDateTime(sheet1.Cells[rowIndex, startCol + 1]), //Date
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 2]), //BonNo
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 3]), //ItemCode
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 4]), //ItemName
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 5]), //Total
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 6]), //Unit
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 7]), //MC
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 8]), //TakenBy
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 9]) //Area                           
+                        ));
+                    }
+                }
+            }
+            catch(Exception ex){
+                throw new Exception($"Gagal memproses Sheet PENGELUARAN_BARANG pada baris ke-{rowIndex} - {ex.Message}");
+            }
+
+            try{
+                if (listData.Count() > 0)
+                {                    
+                    await releaseItemAdapter.DeleteByMonthAndYear(periode);
+                    await releaseItemAdapter.InsertBulk(listData);
+                }
+
+            }
+            catch (Exception ex)
+            {
+
+                throw new Exception("Gagal menyimpan Sheet PENGELUARAN_BARANG - " + ex.Message);
+            }
+        }
+        #endregion
+
+        #region Penerimaan Barang
+        public async Task UploadReceiptItem(ExcelWorksheets sheet, DateTime periode, int data)
+        {
+            var sheet1 = sheet[data];
+            var startRow = 4;
+            var startCol = 1;
+
+            var totalRows = sheet1.Dimension.Rows;
+            var totalCols = sheet1.Dimension.Columns;
+
+            var listData = new List<ChemicalReceiptItemModel>();
+            int rowIndex = 0;
+            try
+            {                
+                for (rowIndex = startRow; rowIndex <= totalRows; rowIndex++)
+                {
+
+                    if (sheet1.Cells[rowIndex, startCol].Value != null)
+                    {
+                        general.ValidatePeriode(sheet1.Cells[rowIndex,2], periode);
+                        listData.Add(new ChemicalReceiptItemModel(
+                           general.GenerateId(sheet1.Cells[rowIndex, startCol + 1], sheet1.Cells[rowIndex, 1]), //ID
+                           Convert.ToInt32(sheet1.Cells[rowIndex, startCol].Value), //No
+                           general.ConvertDateTime(sheet1.Cells[rowIndex, startCol + 1]), //Date
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 2]), //UnitArea
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 3]), //BonNo
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 4]), //SupplierName
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 5]), //PONo
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 6]), //Code
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 7]), //ItemName
+                           converter.GenerateValueDouble(sheet1.Cells[rowIndex, startCol + 8]), //Total
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 9]), //Unit                           
+                           converter.GenerateValueString(sheet1.Cells[rowIndex, startCol + 10]) // Description
+                        ));
+                    }
+                }
+            }
+            catch(Exception ex){
+                throw new Exception($"Gagal memproses Sheet PENERIMAAN_BARANG pada baris ke-{rowIndex} - {ex.Message}");
+            }
+
+            try{
+                if (listData.Count() > 0)
+                {
+                    await receiptItemAdapter.DeleteByMonthAndYear(periode);
+                    await receiptItemAdapter.InsertBulk(listData);
+                }
+
+            }
+            catch (Exception ex)
+            {
+
+                throw new Exception("Gagal menyimpan Sheet PENERIMAAN_BARANG - " + ex.Message);
+            }
+        }
+        #endregion
+    }
+}
